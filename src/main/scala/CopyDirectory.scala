@@ -1,22 +1,42 @@
 import java.io.File
-import java.util.Objects
-import java.util.concurrent.{ExecutorService, Executors, Future}
-import scala.concurrent.ExecutionException
-import scala.concurrent.ExecutionContext.Implicits.global
+import java.nio.file.Files
+import java.util.concurrent.Executors
+import java.util.logging.Logger
+import scala.concurrent.{ExecutionContext, Future}
 
 
 class CopyDirectory {
 
-  val es: ExecutorService = Executors.newFixedThreadPool(4)
+  private val logger = Logger.getLogger(getClass.getName)
 
-  @throws[ExecutionException]
-  @throws[InterruptedException]
-  def copy(sourceDirectory: String, destinationDirectory: String): Unit = {
-    for (f <- Objects.requireNonNull(new File(sourceDirectory).list)) {
-      val callable = new CopyDirectoryThread(sourceDirectory, destinationDirectory, f)
-      val tasks: Future[Unit] = es.submit(callable)
-      tasks.get
-    }
-    es.shutdown()
+  implicit val ec: ExecutionContext = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(4))
+
+  def copy(sourceDirectory: String, destinationDirectory: String): Future[Unit] = {
+    val tasks =
+      for (f <- new File(sourceDirectory).list()) yield {
+        Future {
+          call(sourceDirectory, destinationDirectory, f)
+        }
+      }
+
+    Future.sequence(tasks.toSeq).map(_ => ())
+
   }
+
+  def call(fileIn: String, fileOut: String, f: String): Unit = {
+    if (new File(fileIn, f).isDirectory) {
+      copyDirectoryCompatibilityMode(new File(fileIn, f), new File(fileOut))
+    }
+    else {
+      Files.copy(new File(fileIn, f).toPath, new File(fileOut, f).toPath)
+      logger.info("copying " + fileIn + f + " to " + fileOut)
+    }
+  }
+
+  private def copyDirectoryCompatibilityMode(source: File, destination: File): Unit = {
+    logger.info("open " + source)
+    val cd = new CopyDirectory
+    cd.copy(source.toPath.toString, destination.toPath.toString)
+  }
+
 }
